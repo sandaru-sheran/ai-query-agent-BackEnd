@@ -16,6 +16,10 @@ def get_database():
 def get_history():
     return ConvasationService.get_history()
 
+@router.delete("/history")
+def delete_history():
+    ConvasationService.delete_history()
+
 @router.post("/query")
 def call_ai_agent(query: str):
      return AiAgentService.callAlAgent(query)[1]

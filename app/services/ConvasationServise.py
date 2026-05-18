@@ -23,3 +23,6 @@ class ConvasationServise:
                 "content": msg.content
             })
         return mapped_history
+
+    def delete_history(self):
+        self.repository.delete_messages()

@@ -47,3 +47,10 @@ class ConversationRepository:
                     messages.append(ToolMessage(content=msg.content, tool_call_id="hist_fallback"))
 
             return messages
+
+    def delete_messages(self):
+        """Truncates the messages table and resets the auto-increment ID counter."""
+        with self.SessionLocal() as db:
+            from sqlalchemy import text
+            db.execute(text("TRUNCATE TABLE messages;"))
+            db.commit()
