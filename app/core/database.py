@@ -1,15 +1,19 @@
+import os
+
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 
+load_dotenv()
 # MySQL connection details
-MYSQL_URL = "mysql+pymysql://root:1234@localhost:3306/uni"
-CONVERSATION_DB_URL = "mysql+pymysql://root:1234@localhost:3306/conversation"
+UNI_DB_URL = os.getenv("UNI_DB_URL")
+CONVERSATION_DB_URL = os.getenv("CONVERSATION_DB_URL")
 
-engine = create_engine(MYSQL_URL)
+uni_engine = create_engine(UNI_DB_URL)
 conversation_engine = create_engine(CONVERSATION_DB_URL)
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=uni_engine)
 ConversationSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=conversation_engine)
 
 Base = declarative_base()

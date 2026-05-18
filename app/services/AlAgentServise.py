@@ -1,17 +1,18 @@
-from sqlalchemy.orm import Session
-from typing import TypedDict,List
+import os
+
+from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langgraph.constants import START, END
 from langgraph.graph import StateGraph, add_messages
 from langgraph.prebuilt import ToolNode
-from typing_extensions import Annotated
-
 from app.repositories.AIAgentRepository import AIAgentRepository
 from app.repositories.ConversationRepository import ConversationRepository
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
-
 from app.models.Conversation import MessageModel, ConversationAgent
+
+load_dotenv()
+
 class AlAgentServise:
     def __init__(self):
         self.conversationRepo = ConversationRepository()
@@ -23,10 +24,10 @@ class AlAgentServise:
             tool(self.validateQuery)
         ]
         self.llm = ChatOpenAI(
-                temperature=0.0,
-                model_name="qwen2.5-coder-7b-instruct",
-                base_url="http://127.0.0.1:1234/v1",
-                api_key="lm-studio"
+                temperature=os.getenv("AGENT_TEMPERATURE"),
+                model_name=os.getenv("AGENT_MODEL_NAME"),
+                base_url=os.getenv("LLM_BASE_URL"),
+                api_key=os.getenv("LLM_API_KEY")
             ).bind_tools(self.tools)
 
         self.tool_node = ToolNode(tools=self.tools)
@@ -60,13 +61,13 @@ class AlAgentServise:
             "You are an automated, autonomous SQL Data Analytics Assistant.\n"
             "Your job is to answer user data requests by exploring the database.\n\n"
             "CRITICAL RULES:\n"
-            "1. Do NOT ask the user for confirmation or permission (e.g., never say 'Would you like me to run this?'). Just execute tools immediately.\n"
-            "2. If you do not know the layout of the tables, always call 'getDatabaseScema' first.\n"
-            "3. MANDATORY VERIFICATION: Before you call 'executeQuery' for any SQL statement, you MUST call 'validateQuery' first to verify it is safe.\n"
-            "4. Only call 'executeQuery' if 'validateQuery' returns an APPROVED status.\n"
-            "5. Present the data results directly to the user in a clean summary."
+            "1. FRESH EVALUATION: Focus entirely on the latest user request. Do NOT reuse, copy, or rely on mock structures, tables, or outputs from the chat history. Treat every new query with a clean slate.\n\n"
+            "2. THE BLINDNESS RULE (STRICT SCHEMA INTELLIGENCE): You currently have ZERO knowledge of the database structure. Any tables you assume exist (like 'customers', 'sales', or 'employees') are hallucinations. If the user asks what you can do, asks for examples, or uses words like 'database' or 'schema', you MUST immediately call 'getDatabaseScema' before writing a single word. Never guess the table names.\n\n"
+            "3. HANDLING NOT FOUND: If the requested data, table, or column cannot be found anywhere in the database schema, do NOT attempt to generate or execute a query. Instead, respond immediately and cleanly to the user explaining that this information is not available in the current system.\n\n"
+            "4. NO CHATTER FOR PERMISSION: Do NOT ask the user for confirmation or permission (e.g., never say 'Would you like me to run this?'). Just execute tools immediately.\n\n"
+            "5. MANDATORY VERIFICATION: Before you call 'executeQuery' for any SQL statement, you MUST call 'validateQuery' first to verify it is safe. Only call 'executeQuery' if 'validateQuery' returns an APPROVED status.\n\n"
+            "6. EMPTY RESULTS LOGIC: Present the data results directly to the user in a clean summary. If a validated query runs successfully but returns an empty result ([]), state clearly that no matching records were found."
         ))
-
         history = self.conversationRepo.load_messages() or []
 
         msgs = [system_directive, *history, *state["messages"]]
@@ -97,27 +98,31 @@ class AlAgentServise:
 
     def validateQuery(self, query: str) -> str:
         """
-        Validate a SQL query to ensure it doesn't contain forbidden keywords like DROP, DELETE, etc.
+        Validate a SQL query to ensure it doesn't contain destructive commands. Returns an approval status. IMPORTANT: If the query is approved, you MUST subsequently call executeQuery to retrieve the actual data..
 
         Args:
             query: The SQL query string to validate.
         """
         system_prompt = SystemMessage(content=(
             "You are a strict database security gatekeeper. Analyze the input query. "
-            "If the query contains any modifications, deletions, or structural changes "
-            "such as DROP, DELETE, UPDATE, INSERT, ALTER, or TRUNCATE, you MUST reject it.\n\n"
-            "If rejected, reply exactly with: "
-            "'REJECTED: This operation is strictly forbidden. Tell the user that you cannot perform this action.'\n\n"
+
+            "CRITICAL RULE: If the input is a conversational greeting, a clarification question, "
+            "or general text (e.g., 'hi', 'hello', 'how are you'), you MUST approve it. "
+            "Reply exactly with: 'APPROVED: Conversational.'\n\n"
+
+            "If the query contains any database modifications, deletions, or structural changes "
+            "such as DROP, DELETE, UPDATE, INSERT, ALTER, or TRUNCATE, you MUST reject it. "
+            "Reply exactly with: 'REJECTED: This operation is strictly forbidden. Tell the user that you cannot perform this action.'\n\n"
+
             "If it is a safe read-only query (like SELECT), reply with: 'APPROVED: Safe to execute.'"
         ))
-
         human_prompt = HumanMessage(content=f"Query to analyze:\n{query}")
 
         new_llm = ChatOpenAI(
-            temperature=0.0,
-            model_name="qwen2.5-coder-7b-instruct",
-            base_url="http://127.0.0.1:1234/v1",
-            api_key="lm-studio"
+            temperature=os.getenv("VALIDATION_TEMPERATURE"),
+            model_name=os.getenv("VALIDATION_MODEL_NAME"),
+            base_url=os.getenv("LLM_BASE_URL"),
+            api_key=os.getenv("LLM_API_KEY")
         )
 
         responce = new_llm.invoke([system_prompt, human_prompt])
@@ -130,17 +135,17 @@ class AlAgentServise:
         raw_final_text = raw_messages[-1].content
 
         polishing_llm = ChatOpenAI(
-            temperature=0.5,  # Higher temperature for better phrasing
-            model_name="qwen2.5-coder-7b-instruct",
-            base_url="http://127.0.0.1:1234/v1",
-            api_key="lm-studio"
+            temperature=os.getenv("POLISH_TEMPERATURE"),  # Higher temperature for better phrasing
+            model_name=os.getenv("POLISH_MODEL_NAME"),
+            base_url=os.getenv("LLM_BASE_URL"),
+            api_key=os.getenv("LLM_API_KEY")
         )
-
         system_directive = SystemMessage(content=(
             "You are a strict Data Formatter and Privacy Filter. Your job is to format raw database output for an end-user.\n\n"
             "CRITICAL RULES:\n"
-            "1. NO CHATTER: Do not include ANY introductory or concluding sentences (e.g., NEVER say 'Let's execute that query', 'Here is the data', or 'To get details...'). Start immediately with the formatted data.\n"
-            "2. PRIVACY FIREWALL: You MUST silently remove any sensitive data. Never output passwords, bcrypt hashes, security tokens, or disabled flags. Exclude those fields completely.\n"
+            "0. BYPASS CLAUSE: If the raw data input is already conversational text, an explanation, a summary of the database schema, or a friendly message (e.g., descriptions of tables, structural summaries, or regular answers), you MUST output it exactly as it is. Do NOT strip it, do NOT convert it into SQL, and do NOT change a single word.\n\n"
+            "1. NO CHATTER FOR RAW DATA: If the input consists of raw database rows/JSON, do not include ANY introductory or concluding sentences (e.g., NEVER say 'Let's execute that query', 'Here is the data', or 'To get details...'). Start immediately with the formatted data.\n\n"
+            "2. PRIVACY FIREWALL: You MUST silently remove password fields. Never output raw passwords or bcrypt hashes. Exclude those fields completely. All other fields (including names, roles, registration numbers, and status flags) are safe to display.\n\n"
             "3. ACCURACY: Keep the safe data values perfectly accurate. Do not change names, IDs, or standard emails."
         ))
 

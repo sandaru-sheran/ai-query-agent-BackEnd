@@ -1,12 +1,11 @@
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-
-from app.core.database import engine
+from app.core.database import uni_engine
 
 
 class AIAgentRepository:
     def __init__(self):
-        self.engine = engine
+        self.engine = uni_engine
 
 
     def get_database_schema(self):
