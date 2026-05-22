@@ -87,7 +87,7 @@ Depending on the size of the LLM loaded in LM Studio, try these prompts to test 
 
 **What AI helped with:** Scaffolding the React frontend components, generating the baseline database schema, and creating the mock seed data. 
 
-**What I personally implemented or modified:** I manually designed and implemented 90% of the LangGraph architecture and the `AIAgentService` logic. Because I spent over 30 hours closely developing, debugging, and refining this project, the rest of the codebase is a seamless blend of my manual coding and AI generation, making it difficult to separate the two line-by-line. 
+**What I personally implemented or modified:** I manually designed and implemented 90% of the LangGraph architecture and the `AIAgentService` logic. Because I spent over 20 hours closely developing, debugging, and refining this project, the rest of the codebase is a seamless blend of my manual coding and AI generation, making it difficult to separate the two line-by-line. 
 
 **Parts I fully understand and can explain:** I fully understand the custom LangGraph routing logic, state management, the SQL security gatekeeper, and the full end-to-end communication flow from the frontend to the database execution.
 
