@@ -17,9 +17,9 @@ class AlAgentServise:
     def __init__(self):
         self.conversationRepo = ConversationRepository()
         self.aiRepo = AIAgentRepository()
-        self.messageHistry = self.conversationRepo.load_messages() or []
+        self.messageHistory = self.conversationRepo.load_messages() or []
         self.tools = [
-            tool(self.getDatabaseScema),
+            tool(self.getDatabaseSchema),
             tool(self.executeQuery),
             tool(self.validateQuery)
         ]
@@ -45,7 +45,13 @@ class AlAgentServise:
     def callAlAgent(self, query: str) -> list[dict]:
         state = {"messages":self.conversationRepo.load_messages() or []}
         state["messages"].append(HumanMessage(content=query))
-        result = self.app.invoke(state)
+        try:
+            result = self.app.invoke(state)
+        except Exception as e:
+            print(f"Graph Execution Error: {e}")
+            result = {"messages": [
+                AIMessage(content=f"SYSTEM_ERROR: The agent encountered a fatal error and stopped. Details: {str(e)}")]}
+
         print(result)
         clean_chat = self.run_polishing_agent(query, result["messages"])
 
@@ -71,9 +77,16 @@ class AlAgentServise:
         history = self.conversationRepo.load_messages() or []
 
         msgs = [system_directive, *history, *state["messages"]]
-        response = self.llm.invoke(msgs)
+        try:
+            response = self.llm.invoke(msgs)
+            return {"messages": [response]}
 
-        return {"messages": [response] }
+        except Exception as e:
+            print(f"LLM Invocation Error: {e}")
+            error_message = AIMessage(
+                content=f"Sorry, I am currently unavailable due to a system or connection error. (Details: {str(e)})")
+
+        return {"messages": [error_message] }
 
     def repeatAlAgent(self,state : ConversationAgent):
         lastMassege = state["messages"][-1]
@@ -82,17 +95,28 @@ class AlAgentServise:
         else:
             return END
 
-    def getDatabaseScema(self) -> dict:
-        """Fetch the database schema including table names and their columns."""
+    def getDatabaseSchema(self) -> dict | str:
+        """
+        Fetch the database schema including table names and their column details.
+
+        Returns:
+            dict: A dictionary mapping the schema ({"database": [...]}) on success.
+            str: An error string prefixed with 'DATABASE_ERROR:' or 'SYSTEM_ERROR:'
+                 if the database connection or execution fails, allowing the AI agent
+                 to handle the failure gracefully.
+        """
         return self.aiRepo.get_database_schema()
 
-
-    def executeQuery(self, query: str) -> dict:
+    def executeQuery(self, query: str) -> list | str:
         """
-        Execute a raw SQL query on the database.
-        
+        Execute a raw SQL SELECT query on the database.
+
         Args:
-            query: The SQL query string to execute.
+            query (str): The raw SQL query string to execute.
+
+        Returns:
+            list: A list of dictionaries containing the fetched rows.
+            str: An error string prefixed with 'DATABASE_ERROR:' if the query fails.
         """
         return self.aiRepo.execute_raw_query(query)
 
@@ -118,15 +142,18 @@ class AlAgentServise:
         ))
         human_prompt = HumanMessage(content=f"Query to analyze:\n{query}")
 
-        new_llm = ChatOpenAI(
-            temperature=os.getenv("VALIDATION_TEMPERATURE"),
-            model_name=os.getenv("VALIDATION_MODEL_NAME"),
-            base_url=os.getenv("LLM_BASE_URL"),
-            api_key=os.getenv("LLM_API_KEY")
-        )
-
-        responce = new_llm.invoke([system_prompt, human_prompt])
-        return responce.content
+        try:
+            new_llm = ChatOpenAI(
+                temperature=float(os.getenv("VALIDATION_TEMPERATURE", 0.0)),
+                model_name=os.getenv("VALIDATION_MODEL_NAME"),
+                base_url=os.getenv("LLM_BASE_URL"),
+                api_key=os.getenv("LLM_API_KEY")
+            )
+            response = new_llm.invoke([system_prompt, human_prompt])
+            return response.content
+        except Exception as e:
+            print(f"Validation Agent Error: {e}")
+            return f"REJECTED: The security validation service is temporarily unavailable. Cannot execute query. (Details: {str(e)})"
 
     def run_polishing_agent(self, user_query: str, raw_messages: list) -> list[dict]:
         """
@@ -134,28 +161,38 @@ class AlAgentServise:
         """
         raw_final_text = raw_messages[-1].content
 
-        polishing_llm = ChatOpenAI(
-            temperature=os.getenv("POLISH_TEMPERATURE"),  # Higher temperature for better phrasing
-            model_name=os.getenv("POLISH_MODEL_NAME"),
-            base_url=os.getenv("LLM_BASE_URL"),
-            api_key=os.getenv("LLM_API_KEY")
-        )
-        system_directive = SystemMessage(content=(
-            "You are a strict Data Formatter and Privacy Filter. Your job is to format raw database output for an end-user.\n\n"
-            "CRITICAL RULES:\n"
-            "0. BYPASS CLAUSE: If the raw data input is already conversational text, an explanation, a summary of the database schema, or a friendly message (e.g., descriptions of tables, structural summaries, or regular answers), you MUST output it exactly as it is. Do NOT strip it, do NOT convert it into SQL, and do NOT change a single word.\n\n"
-            "1. NO CHATTER FOR RAW DATA: If the input consists of raw database rows/JSON, do not include ANY introductory or concluding sentences (e.g., NEVER say 'Let's execute that query', 'Here is the data', or 'To get details...'). Start immediately with the formatted data.\n\n"
-            "2. PRIVACY FIREWALL: You MUST silently remove password fields. Never output raw passwords or bcrypt hashes. Exclude those fields completely. All other fields (including names, roles, registration numbers, and status flags) are safe to display.\n\n"
-            "3. ACCURACY: Keep the safe data values perfectly accurate. Do not change names, IDs, or standard emails."
-        ))
+        try:
+            polishing_llm = ChatOpenAI(
+                temperature=float(os.getenv("POLISH_TEMPERATURE", 0.7)),  # Float cast for safety
+                model_name=os.getenv("POLISH_MODEL_NAME"),
+                base_url=os.getenv("LLM_BASE_URL"),
+                api_key=os.getenv("LLM_API_KEY")
+            )
 
-        human_prompt = HumanMessage(
-            content=f"User asked: {user_query}\n\nRaw Data to format:\n{raw_final_text}"
-        )
+            system_directive = SystemMessage(content=(
+                "You are a strict Data Formatter and Privacy Filter. Your job is to format raw database output for an end-user.\n\n"
+                "CRITICAL RULES:\n"
+                "0. BYPASS CLAUSE: If the raw data input is already conversational text, an explanation, a summary of the database schema, or a friendly message (e.g., descriptions of tables, structural summaries, or regular answers), you MUST output it exactly as it is. Do NOT strip it, do NOT convert it into SQL, and do NOT change a single word. (EXCEPTION: If the text is a system error, follow Rule 4 instead).\n\n"
+                "1. NO CHATTER FOR RAW DATA: If the input consists of raw database rows/JSON, do not include ANY introductory or concluding sentences. Start immediately with the formatted data.\n\n"
+                "2. PRIVACY FIREWALL: You MUST silently remove password fields. Never output raw passwords or bcrypt hashes. Exclude those fields completely. All other fields (including names, roles, registration numbers, and status flags) are safe to display.\n\n"
+                "3. ACCURACY: Keep the safe data values perfectly accurate. Do not change names, IDs, or standard emails.\n\n"
+                "4. ERROR TRANSLATION (PRIORITY ORDER): If the input contains a raw technical error, a traceback, or a string starting with 'DATABASE_ERROR:' or 'SYSTEM_ERROR:', you MUST completely hide all technical code and stack traces. Instead, dynamically craft a polite, user-friendly explanation based on the exception using this priority:\n"
+                "   - PRIORITY 1 (AI/System Issues): If the error involves LLMs, API, validation, timeouts, or is a 'SYSTEM_ERROR', explain to the user that the AI agent is currently unavailable or experiencing technical difficulties.\n"
+                "   - PRIORITY 2 (Database Issues): If the error is strictly a 'DATABASE_ERROR', explain to the user that there is an issue accessing the database or retrieving the requested information."
+            ))
 
-        polished_result = polishing_llm.invoke([system_directive, human_prompt])
+            human_prompt = HumanMessage(
+                content=f"User asked: {user_query}\n\nRaw Data to format:\n{raw_final_text}"
+            )
+
+            polished_result = polishing_llm.invoke([system_directive, human_prompt])
+            final_content = polished_result.content
+
+        except Exception as e:
+            print(f"Polishing Agent Error: {e}")
+            final_content = f"An error occurred while formatting the final response. Data cannot be securely displayed at this time. (Details: {str(e)})"
 
         return [
             {"role": "human", "content": user_query},
-            {"role": "ai", "content": polished_result.content}
+            {"role": "ai", "content": final_content}
         ]
