@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, JSON
-from app.core.database import Base
+from app.core.Database import Base
 from datetime import datetime
 from typing import Annotated, Sequence, TypedDict, List
 from langchain_core.messages import BaseMessage, ToolMessage, SystemMessage, HumanMessage, AIMessage

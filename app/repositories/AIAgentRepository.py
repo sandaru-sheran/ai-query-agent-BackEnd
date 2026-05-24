@@ -1,46 +1,59 @@
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 from sqlalchemy.exc import SQLAlchemyError
-from app.core.database import uni_engine
+
+from core import Database
 
 
 class AIAgentRepository:
-    def __init__(self):
-        self.engine = uni_engine
 
     def get_database_schema(self):
         database_map = []
+        session = Database.get_db()
 
         try:
-            with self.engine.connect() as connection:
-                query_tables = text("SHOW TABLES")
-                tables_result = connection.execute(query_tables)
+            # 1. Get the engine from the current session
+            engine = session.get_bind()
 
-                table_names = [row[0] for row in tables_result]
+            # 2. Create the SQLAlchemy Inspector
+            inspector = inspect(engine)
 
-                for table in table_names:
-                    query_desc = text(f"DESCRIBE {table}")
-                    desc_result = connection.execute(query_desc)
+            # 3. Get all table names (works on ANY database)
+            table_names = inspector.get_table_names()
 
-                    columns_info = [dict(row._mapping) for row in desc_result]
+            for table in table_names:
+                # 4. Get the columns for each table
+                columns = inspector.get_columns(table)
 
-                    database_map.append({
-                        "table_name": table,
-                        "schema": columns_info
+                columns_info = []
+                for col in columns:
+                    columns_info.append({
+                        "name": col["name"],
+                        # Convert the SQLAlchemy Type object to a string so FastAPI can return it as JSON
+                        "type": str(col["type"]),
+                        "nullable": col.get("nullable", True),
+                        "primary_key": col.get("primary_key", 0) > 0  # Some dialects return 1 for PK
                     })
+
+                database_map.append({
+                    "table_name": table,
+                    "columns": columns_info
+                })
 
             return {"database": database_map}
 
         except SQLAlchemyError as e:
-            # Catches database-specific errors (connection drops, timeout, syntax)
             return f"DATABASE_ERROR: Failed to retrieve schema. Details: {str(e)}"
 
         except Exception as e:
-            # Catches any other unexpected Python errors
             return f"SYSTEM_ERROR: An unexpected error occurred while fetching the schema. Details: {str(e)}"
 
+        finally:
+            session.close()
+
     def execute_raw_query(self, sql_string: str):
+        databse = Database.get_db()
         try:
-            with self.engine.connect() as connection:
+            with databse as connection:
                 query = text(sql_string)
                 result = connection.execute(query)
 

@@ -1,7 +1,7 @@
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
 from sqlalchemy.orm import sessionmaker
 from app.models.Conversation import MessageModel
-from app.core.database import conversation_engine, Base
+from app.core.Database import conversation_engine, Base
 
 class ConversationRepository:
     def __init__(self):
